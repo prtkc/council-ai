@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Council</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#/new"><span class="mark" aria-hidden="true"><i></i><i></i></span>Council</a>
+      <a class="new-run" href="#/new">New run</a>
+      <h2>Runs</h2>
+      <nav id="run-list" aria-label="Runs"></nav>
+    </aside>
+    <main id="main"></main>
+  </div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

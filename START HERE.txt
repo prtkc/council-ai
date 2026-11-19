@@ -1,0 +1,25 @@
+COUNCIL: FIRST-TIME SETUP (Mac)
+
+You need a Claude subscription, a ChatGPT plan that includes Codex, or both.
+One is enough, because a model can work against itself.
+
+1. Move this Council folder somewhere you will keep it, such as Documents.
+
+2. Open the Terminal app.
+
+3. Type   zsh   followed by a space. Do not press Return yet.
+
+4. Drag "Start Council.command" from this folder into the Terminal window,
+   then press Return.
+
+5. If Council asks to download Node.js, type y.
+
+6. Council opens in your browser. Under Claude or ChatGPT, click Install,
+   then Sign in, and follow the steps in the browser. Then click
+   Test connection.
+
+Keep the Terminal window open while you use Council.
+
+After the first time, you can use the same Terminal steps to start it again.
+Double-clicking "Start Council.command" also works if you allow it under
+System Settings > Privacy & Security > Open Anyway.

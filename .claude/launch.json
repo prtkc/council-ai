@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "council-test",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "chmod +x test/fake-claude.js; COUNCIL_CLAUDE_BIN=\"$PWD/test/fake-claude.js\" COUNCIL_RUNS_DIR=\"$TMPDIR/council-ui-test\" COUNCIL_PORT=4399 exec node src/main.js --no-open"
+      ],
+      "port": 4399
+    },
+    {
+      "name": "council-live",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "COUNCIL_RUNS_DIR=\"$TMPDIR/council-live-test\" COUNCIL_PORT=4396 exec node src/main.js --no-open"
+      ],
+      "port": 4396
+    }
+  ]
+}

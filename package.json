@@ -1,0 +1,14 @@
+{
+  "name": "council-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Two AI models work on a topic together, using your local subscriptions.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js",
+    "verify": "node scripts/verify-sandbox.js",
+    "package": "sh scripts/package.sh"
+  }
+}
