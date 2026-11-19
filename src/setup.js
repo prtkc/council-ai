@@ -65,15 +65,21 @@ function runInstall(tool, job) {
   });
 }
 
-export async function install(provider) {
+// Starts an install and returns a promise that settles when it ends. It never rejects.
+export function install(provider) {
   const tool = TOOLS[provider];
   if (!tool) throw new Error('Unknown tool.');
   const job = jobs[provider];
-  if (job.state === 'running') return;
+  if (job.state === 'running') return queue;
   Object.assign(job, { state: 'running', message: '' });
-  await fs.mkdir(toolsDir(), { recursive: true });
-  queue = queue.then(() => runInstall(tool, job)); // npm cannot run twice in one folder.
+  queue = queue // npm cannot run twice in one folder.
+    .then(() => fs.mkdir(toolsDir(), { recursive: true }))
+    .then(() => runInstall(tool, job))
+    .catch((e) => { Object.assign(job, { state: 'failed', message: e.message }); });
+  return queue;
 }
+
+export const toolName = (provider) => (provider === 'claude' ? 'Claude' : 'ChatGPT');
 
 const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 

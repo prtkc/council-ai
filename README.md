@@ -50,9 +50,11 @@ Paste this into Claude, ChatGPT, or any AI assistant:
 ```text
 I want to use Council, a free Mac app that has Claude and ChatGPT work on a question together and then combine their work into one document: https://github.com/prtkc/council-ai
 
-Please help me install and start it. I'm not technical, so give me one step at a time and wait for me to confirm each step worked before the next one.
+Please set it up for me as quickly as possible. First read the setup guide at https://raw.githubusercontent.com/prtkc/council-ai/main/AGENTS.md.
 
-First, read the setup guide at https://raw.githubusercontent.com/prtkc/council-ai/main/AGENTS.md, especially the section "Helping a non-technical person get it running", and follow it. If you can run commands on my computer, do the steps yourself and only tell me what I need to click or approve. Never ask for my passwords. I'll type them into the official sign-in pages myself.
+If you can run commands on my Mac, use its "Fast setup" section. In one message, tell me everything you will do and ask me once for permission to do all of it. Then do it all without stopping to ask again. The only thing I'll do myself is sign in to Claude and ChatGPT in my browser. Never ask for my passwords.
+
+If you can't run commands, give me every step at once as a short numbered list, from the section "Helping a non-technical person get it running".
 
 If I later ask you to change or improve Council, follow the "Contributing changes" section of that file: make the change on a new branch, show me what changed, and only open a pull request after I say yes.
 ```
@@ -67,6 +69,18 @@ If I later ask you to change or improve Council, follow the "Contributing change
 - **Conversation length:** set the maximum number of turns. They stop early if both agree nothing is left to discuss.
 - **Editing:** every prompt, answer, the ground rules, the final document, and the files in the run's folder can be edited. Steps that haven't run yet use your edits. Steps that already ran are flagged so you can re-run them.
 - **Viewing:** answers stream in live, with each model's web searches and file changes. Each block has a one-sentence summary, and **Collapse all** tidies the page.
+- **Speed:** while a run is going, **Hurry up** switches later steps to low effort and short replies, and shortens the conversation. Click it again to go back to normal. If one step is taking too long, **End and continue** stops it, keeps what it has written so far, and moves on.
+
+## Playgrounds
+
+A playground puts several agents in one room. Click **New playground** and start from a software team, an open debate, or a blank canvas.
+
+- **Build your team on a canvas:** click empty space to add an agent, drag agents to arrange the room, and click one to set its name, role, model, effort, and color. Presets include manager, product manager, designer, coder, tester, red teamer, and debate characters.
+- **Project mode:** a head agent speaks first, plans the work, and decides who does what. Agents hand off to each other, and the floor returns to the head when someone hands it back, or after a set number of turns. Everyone shares one workspace folder, so agents can write real files. The head ends the project when the brief is met.
+- **Open conversation:** agents talk in character, with no project. Choose who speaks next: **Speakers choose** (each picks who answers, and anyone left out too long gets pulled in), **Round robin**, or **Random**.
+- **Join in:** post a message as **You** at any time, to everyone or to one agent. You can also pause, end a turn early with **End turn**, hurry the team with **Hurry up**, stop a speaker, edit any message, re-run from any point, and change an agent's role mid-run.
+- **Replay:** after or during a run, click **Replay** to watch the conversation unfold on the canvas. Speech bubbles pop up over each speaker, with an arrow to whoever they're addressing, while the chat timeline fills in on the right. You can play, pause, step forward and back, scrub, and set the speed from 0.5× to 4×.
+- **Summary size:** one switch sets **Small**, **Medium**, or **Large** summaries for every bubble and message.
 
 ## Where your work is saved
 
@@ -75,6 +89,7 @@ Everything stays on your Mac, in the Council folder:
 - `runs/<run id>/run.json` has every prompt, answer, working step, and earlier attempt.
 - `runs/<run id>/combined.md` is the final combined document.
 - `runs/<run id>/workspace/` is the folder the models work in.
+- `playgrounds/<id>/playground.json` holds each playground's agents and messages. Its `workspace/` holds the team's files.
 
 ## Safety
 

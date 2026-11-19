@@ -133,6 +133,8 @@ export function parseOutput(text) {
   return { output: output.trim(), summary: summary || null, agreed };
 }
 
+export const HURRY_NOTE = 'The user asked to hurry up. Keep this reply short and focused on what matters most. Search the web only if it is essential, and at most once.';
+
 export function promptSuffix(run, seat) {
   const me = nameOf(run, seat);
   const them = nameOf(run, other(seat));

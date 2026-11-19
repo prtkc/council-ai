@@ -1,5 +1,6 @@
 import { esc, markdown } from '/markdown.js';
 import { renderNew } from '/new-run.js';
+import { renderPlayground, renderPlaygroundPicker } from '/playground.js';
 
 const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
 const STATE_LABEL = { running: 'Running', pausing: 'Pausing after current step', paused: 'Paused', attention: 'Needs attention', complete: 'Complete' };
@@ -49,21 +50,35 @@ function duration(s) {
 }
 
 // --- Sidebar ---
-const runsSource = new EventSource('/api/runs/events');
-runsSource.addEventListener('runs', (e) => {
+function renderRunList(e) {
   const { runs } = JSON.parse(e.data);
   $('#run-list').innerHTML = runs.length
-    ? runs.map((r) => `<a href="#/run/${r.id}" class="${r.id === ui.run?.id ? 'active' : ''}"><span class="dot state-${r.state}"></span><span class="run-name">${esc(r.title)}</span></a>`).join('')
+    ? runs.map((r) => `<a href="#/run/${r.id}" class="${location.hash === `#/run/${r.id}` ? 'active' : ''}"><span class="dot state-${r.state}"></span><span class="run-name">${esc(r.title)}</span></a>`).join('')
     : '<p class="muted small">No runs yet.</p>';
-});
+}
+function renderPgList(e) {
+  const { playgrounds } = JSON.parse(e.data);
+  $('#pg-list').innerHTML = playgrounds.length
+    ? playgrounds.map((p) => `<a href="#/playground/${p.id}" class="${location.hash === `#/playground/${p.id}` ? 'active' : ''}"><span class="dot state-${p.state === 'draft' ? 'paused' : p.state}"></span><span class="run-name">${esc(p.title)}</span></a>`).join('')
+    : '<p class="muted small">No playgrounds yet.</p>';
+}
+
+// Each page keeps exactly one live connection, for the sidebar and whatever is open.
+let stream = null;
+function watch(query = '') {
+  stream?.close();
+  stream = new EventSource(`/api/stream${query}`);
+  stream.addEventListener('runs', renderRunList);
+  stream.addEventListener('playgrounds', renderPgList);
+  return stream;
+}
 
 // --- Run page ---
 function openRun(id) {
-  ui.source?.close();
   Object.assign(ui, { run: null, tab: 'workflow', layout: '', file: null, docEdit: null, rulesDraft: null, bulk: null });
   ui.edits.clear(); ui.toggled.clear(); ui.sigs.clear();
   main.innerHTML = '<div class="page"><p class="muted">Loading…</p></div>';
-  const es = new EventSource(`/api/runs/${id}/events`);
+  const es = watch(`?run=${encodeURIComponent(id)}`);
   ui.source = es;
   es.addEventListener('snapshot', (e) => { ui.run = JSON.parse(e.data).run; renderRun(); });
   es.addEventListener('delta', (e) => { const d = JSON.parse(e.data); const s = stepOf(d.stepId); if (s) { s.output += d.text; markLive(s.id); } });
@@ -99,6 +114,7 @@ function renderRun() {
     <div class="head-actions">
       <label class="turns">Stance <select id="run-stance" title="How adversarial the participants are">${r.stances.map((s) => `<option value="${s.id}" ${s.id === r.stance ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select></label>
       <label class="turns">Max turns <input id="max-turns" type="number" min="0" max="50" value="${r.maxTurns}" ${stepOf('final-draft').status !== 'pending' ? 'disabled' : ''}></label>
+      ${r.state !== 'complete' ? `<button class="hurry" data-hurry aria-pressed="${Boolean(r.hurry)}" title="${r.hurry ? 'Go back to normal effort and the full turn limit' : 'Use low effort and short replies from the next step, and end the conversation after one more turn each'}">${r.hurry ? 'Hurrying' : 'Hurry up'}</button>` : ''}
       ${canPause ? '<button data-run="pause">Pause</button>' : ''}${canResume ? '<button class="primary" data-run="resume">Resume</button>' : ''}
     </div>`;
   $('#stepper').innerHTML = PHASES.map((p) => {
@@ -169,7 +185,7 @@ function renderCard(s) {
   ui.dirty.delete(s.id);
   const running = s.status === 'running';
   const buttons = [];
-  if (running) buttons.push(['stop', 'Stop']);
+  if (running) buttons.push(['end', 'End and continue'], ['stop', 'Stop']);
   if (s.status === 'done') buttons.push(['edit-output', 'Edit answer'], ['rerun', s.stale ? 'Re-run with changes' : 'Re-run from here']);
   if (['failed', 'stopped', 'skipped'].includes(s.status)) buttons.push(['rerun', s.status === 'skipped' ? 'Run this step' : 'Retry']);
   if (['pending', 'failed', 'stopped'].includes(s.status)) buttons.push(['edit-output', 'Write answer'], ['skip', 'Skip']);
@@ -177,7 +193,7 @@ function renderCard(s) {
   if (s.error) notices.push(`<div class="notice ${s.status === 'failed' ? 'bad' : ''}">${esc(s.error).replace(/\n/g, '<br>')}</div>`);
   if (s.stale) notices.push('<div class="notice warn">Something this step relied on has changed. Re-run to use the update.</div>');
   if (s.skipReason) notices.push(`<div class="notice">${esc(s.skipReason)}</div>`);
-  const tags = [s.manual && 'written by you', s.originalOutput != null && 'edited by you', s.promptEdited && 'prompt edited', s.agreed && 'agreed'].filter(Boolean);
+  const tags = [s.manual && 'written by you', s.originalOutput != null && 'edited by you', s.promptEdited && 'prompt edited', s.agreed && 'agreed', s.hurried && 'hurried', s.endedEarly && 'ended early by you'].filter(Boolean);
   el.className = `card ${seatClass(s.agent)} status-${s.status}`;
   el.innerHTML = `
     <header class="card-head">
@@ -232,6 +248,7 @@ async function cardAction(act, s, key) {
   const post = (a) => api(runPath(`/steps/${s.id}/${a}`), 'POST').then(applyRun);
   const redraw = () => { ui.sigs.delete(s.id); renderCard(s); };
   if (act === 'stop') return post('stop');
+  if (act === 'end') return post('end');
   if (act === 'skip') return post('skip');
   if (act === 'rerun') {
     if (laterWorkExists(s) && !confirm('Re-run this step and every step after it? Previous versions are kept in the run file, but later answers here will be replaced.')) return undefined;
@@ -332,6 +349,7 @@ main.addEventListener('click', guard(async (e) => {
   if (d.tab) { ui.tab = d.tab; $('#tab-body').innerHTML = ''; renderRun(); return; }
   if (d.bulk) { ui.bulk = d.bulk === 'expand'; ui.toggled.clear(); renderWorkflow(); return; }
   if (d.run) { applyRun(await api(runPath(`/${d.run}`), 'POST')); return; }
+  if ('hurry' in d) { applyRun(await api(runPath('/hurry'), 'POST', { on: !ui.run.hurry })); toast(ui.run.hurry ? 'Hurrying from the next step: low effort, short replies, one more turn each.' : 'Back to normal.'); return; }
   if (d.doc) { await docAction(d.doc); return; }
   if ('fileRefresh' in d) { await renderFiles(); return; }
   if (d.file) { await openFile(d.file); return; }
@@ -342,12 +360,20 @@ main.addEventListener('click', guard(async (e) => {
 }));
 setInterval(() => document.querySelectorAll('[data-elapsed]').forEach((el) => { const s = stepOf(el.dataset.elapsed); if (s?.status === 'running') el.textContent = duration(s); }), 1000);
 
+let disposeView = null;
 function route() {
+  disposeView?.();
+  disposeView = null;
+  document.querySelectorAll('.sidebar nav a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === location.hash));
   const m = location.hash.match(/^#\/run\/([\w-]+)$/);
   if (m) { openRun(m[1]); return; }
   ui.run = null;
-  ui.source?.close();
+  ui.source = null;
   document.title = 'Council';
+  const p = location.hash.match(/^#\/playground\/([\w-]+)$/);
+  if (p && p[1] !== 'new') { disposeView = renderPlayground(p[1], { main, api, guard, toast, watch }); return; }
+  watch();
+  if (p) { guard(renderPlaygroundPicker)({ main, api, guard }); return; }
   guard(renderNew)({ main, api, guard });
 }
 window.addEventListener('hashchange', route);

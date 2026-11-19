@@ -26,6 +26,6 @@ test('existing tools come before ones Council installs', () => {
   assert.ok(parts.includes('/h/.local/bin'));
 });
 
-test('only known tools can be installed', async () => {
-  await assert.rejects(install('left-pad'), /Unknown tool/);
+test('only known tools can be installed', () => {
+  assert.throws(() => install('left-pad'), /Unknown tool/);
 });

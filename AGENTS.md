@@ -13,9 +13,35 @@ The non-negotiable design choice: **Council uses the person's own subscriptions 
 - Claude runs through Claude Code: `claude -p --output-format stream-json`.
 - ChatGPT runs through OpenAI's Codex CLI: `codex exec --json`, signed in with a ChatGPT account.
 
+## Fast setup (for agents that can run commands)
+
+Ask for permission once, up front, then run everything without further questions. A good permission request is:
+
+> To set up Council I will: download Council from its GitHub release into your Documents folder, download Node.js into that folder if your Mac doesn't have it, install the Claude and ChatGPT command-line tools inside that folder, open a Terminal window for each sign-in, and start Council in Chrome. Nothing is installed system-wide, and I won't need your password. OK to do all of that?
+
+After one yes, run these commands:
+
+```bash
+curl -fL -o /tmp/Council.zip https://github.com/prtkc/council-ai/releases/latest/download/Council.zip
+```
+
+```bash
+ditto -x -k /tmp/Council.zip ~/Documents
+```
+
+```bash
+zsh ~/Documents/Council/scripts/setup.sh
+```
+
+`setup.sh` takes no questions. It downloads Node.js into `.runtime/` if needed, installs any missing tool into `.tools/`, opens a sign-in Terminal window for each tool that isn't signed in, and starts Council in the background on `http://127.0.0.1:4317`. Pass `claude` or `chatgpt` to set up only one, if the person has only one subscription. It exits once Council is running. Install output is printed as it goes, and server logs go to `council.log`.
+
+Then tell the person to finish signing in using the Terminal window and the browser, and that Council's start page turns green when each tool is ready. Signing in is the one step they must do themselves. Never type or ask for their passwords.
+
+If `~/Documents/Council` already exists, the unzip updates the app files, but keeps their `runs/` and `playgrounds/`.
+
 ## Helping a non-technical person get it running
 
-Assume they only have the GitHub link and a Mac. Walk them through this, one step at a time:
+Use this when you can't run commands. Assume they only have the GitHub link and a Mac. Give them all the steps at once:
 
 1. Download `https://github.com/prtkc/council-ai/releases/latest/download/Council.zip`, unzip it, and move the folder to Documents.
 2. Open Terminal (⌘ Space, type Terminal, press Return).
@@ -26,7 +52,7 @@ Assume they only have the GitHub link and a Mac. Walk them through this, one ste
    - **Sign in** writes `.tools/sign-in-<provider>.command` and opens it in Terminal. It runs `claude auth login --claudeai` or `codex login`, which complete in the browser.
 6. Start a run. If only one provider is ready, both seats default to it.
 
-If you can run commands on their machine, `cd` into the folder and run `zsh "Start Council.command"`. Do not install tools globally or change their shell profile. Council finds tools in this order: already on `PATH`, `~/.local/bin`, Homebrew, then `.tools/node_modules/.bin`.
+Do not install tools globally or change their shell profile. Council finds tools in this order: already on `PATH`, `~/.local/bin`, Homebrew, then `.tools/node_modules/.bin`.
 
 Requirements: macOS, Chrome or any browser, and a Claude subscription or a ChatGPT plan that includes Codex. Windows and Linux are not supported yet. The launcher is zsh and uses macOS's `open`, and Codex's sandbox settings assume macOS.
 
@@ -70,9 +96,11 @@ There are no npm dependencies. The server is Node's built-in `http`, and the fro
 | `src/setup.js` | Tool detection, `.tools` installs, sign-in scripts, and `PATH` setup. |
 | `public/app.js` | Run page: live cards, editors, collapse controls, and the document, files, and setup tabs. |
 | `public/new-run.js` | Start page: tool setup, model and effort dropdowns, and the run form. |
+| `src/playground.js` | `Playgrounds` class: many-agent conversations, turn-taking, templates and presets, prompts, marker parsing, and persistence. |
+| `public/playground.js` | Playground page: template picker, canvas with draggable agents, agent editor, live timeline, composer, and replay. |
 | `public/markdown.js` | Small Markdown renderer. It escapes everything first and never renders raw HTML. |
 | `Start Council.command` | zsh launcher. Finds Node 20 or newer, or offers to download it. |
-| `scripts/` | Node download, zip packaging, and the real-CLI sandbox check. |
+| `scripts/` | One-command setup (`setup.sh`), Node download, zip packaging, and the real-CLI sandbox check. |
 
 ### Workflow
 
@@ -89,6 +117,18 @@ final-draft (drafter) → final-check (other seat) → final-apply (drafter)
 - Each sent prompt is: ground rules + `---` + step prompt + `---` + `promptSuffix()`. The suffix asks for a final `[[SUMMARY: …]]` line. In turns, `[[AGREED]]` comes just before it. `parseOutput()` strips both markers.
 - A finished step is **stale** if something it depended on changed after it started: an earlier group's output or prompt, the ground rules, or, for review steps, the adversarial level. Re-running a step archives it and every later step into `history`.
 - A failed or stopped step blocks the run until the person retries, skips, or writes the answer themselves.
+
+### Playgrounds
+
+One agent speaks at a time. `nextSpeaker()` picks who:
+
+- **Project mode:** the head speaks first. After the head, the agent it named speaks. After anyone else, the floor goes to the agent they named, unless they named the head, named nobody valid, or `headEvery` turns have passed since the head last spoke. In those cases it returns to the head. Only the head's `[[DONE]]` ends a project early.
+- **Open mode:** `turnRule` is `choose`, `round`, or `random`. With `choose`, an agent silent for about two rounds is brought in.
+- A message from the user addressed to one agent makes that agent speak next.
+
+Every agent reply ends with `[[NEXT: name]]`, `[[SUMMARY_S/M/L: …]]`, and optionally `[[DONE]]`. `parseMarkers()` strips them. If a summary is missing, it is cut from the message text instead. Prompts include the roster, the brief, and the transcript. When the transcript is long, older messages use their large summary instead of full text. Prompts are stored per message, but left out of the live snapshot, and fetched on demand.
+
+Data lives in `playgrounds/<id>/playground.json`. The team's shared sandbox is `workspace/`. "Re-run from here" moves later messages into `history`.
 
 ### Run data
 
@@ -118,10 +158,10 @@ npm test
 Offline tests for the scheduler, prompts, parsers, migration, setup, and server guards. They take about a second.
 
 ```bash
-COUNCIL_CLAUDE_BIN="$PWD/test/fake-claude.js" COUNCIL_RUNS_DIR=/tmp/council-test COUNCIL_NO_OPEN=1 npm start
+COUNCIL_CLAUDE_BIN="$PWD/test/fake-claude.js" COUNCIL_RUNS_DIR=/tmp/council-test/runs COUNCIL_PLAYGROUNDS_DIR=/tmp/council-test/pg COUNCIL_NO_OPEN=1 npm start
 ```
 
-Runs the full interface with a stand-in for Claude that uses no plan limits. Make `test/fake-claude.js` executable first.
+Runs the full interface, councils and playgrounds, with a stand-in for Claude that uses no plan limits. Make `test/fake-claude.js` executable first.
 
 ```bash
 npm run verify
@@ -129,4 +169,4 @@ npm run verify
 
 Real CLIs. Sends one short prompt each, and checks that neither can read or write outside its folder.
 
-Environment variables: `COUNCIL_PORT`, `COUNCIL_RUNS_DIR`, `COUNCIL_TOOLS_DIR`, `COUNCIL_CLAUDE_BIN`, `COUNCIL_CODEX_BIN`, `COUNCIL_NO_OPEN`, and `FAKE_CLAUDE_DELAY_MS`.
+Environment variables: `COUNCIL_PORT`, `COUNCIL_RUNS_DIR`, `COUNCIL_PLAYGROUNDS_DIR`, `COUNCIL_TOOLS_DIR`, `COUNCIL_CLAUDE_BIN`, `COUNCIL_CODEX_BIN`, `COUNCIL_NO_OPEN`, and `FAKE_CLAUDE_DELAY_MS`.

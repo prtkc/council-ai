@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Council } from './council.js';
+import { Playgrounds } from './playground.js';
 import { createServer } from './server.js';
 import { setUpPath } from './setup.js';
 
@@ -33,7 +34,9 @@ const listen = (server, port) => new Promise((resolve, reject) => {
 
 const council = new Council({ root: process.env.COUNCIL_RUNS_DIR || path.join(ROOT, 'runs') });
 await council.load();
-const server = createServer(council);
+const playgrounds = new Playgrounds({ root: process.env.COUNCIL_PLAYGROUNDS_DIR || path.join(ROOT, 'playgrounds') });
+await playgrounds.load();
+const server = createServer(council, playgrounds);
 
 let port = BASE_PORT;
 for (;;) {
@@ -60,7 +63,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, async () => {
     if (closing) return;
     closing = true;
-    await council.shutdown();
+    await Promise.all([council.shutdown(), playgrounds.shutdown()]);
     process.exit(0);
   });
 }

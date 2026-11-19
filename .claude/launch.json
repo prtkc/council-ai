@@ -18,6 +18,15 @@
         "COUNCIL_RUNS_DIR=\"$TMPDIR/council-live-test\" COUNCIL_PORT=4396 exec node src/main.js --no-open"
       ],
       "port": 4396
+    },
+    {
+      "name": "council-pg",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "chmod +x test/fake-claude.js; COUNCIL_CLAUDE_BIN=\"$PWD/test/fake-claude.js\" FAKE_CLAUDE_DELAY_MS=20 COUNCIL_RUNS_DIR=\"$TMPDIR/council-pg-test/runs\" COUNCIL_PLAYGROUNDS_DIR=\"$TMPDIR/council-pg-test/pg\" COUNCIL_PORT=4394 exec node src/main.js --no-open"
+      ],
+      "port": 4394
     }
   ]
 }

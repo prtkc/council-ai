@@ -7,7 +7,7 @@ import path from 'node:path';
 import { loadCatalog } from './models.js';
 import { runAgent as defaultRunAgent } from './providers.js';
 import {
-  DEFAULT_GROUND_RULES, MAX_TURNS_LIMIT, SEATS, STANCES, STANCE_KINDS, buildPrompt, getStep, groupIndex, groupsOf,
+  DEFAULT_GROUND_RULES, HURRY_NOTE, MAX_TURNS_LIMIT, SEATS, STANCES, STANCE_KINDS, buildPrompt, getStep, groupIndex, groupsOf,
   makeSteps, migrateRun, parseOutput, promptSuffix, turnStep, turnsOf, validateConfig,
 } from './workflow.js';
 
@@ -134,8 +134,8 @@ export class Council extends EventEmitter {
     const key = `${run.id}/${s.id}`;
     const body = s.promptOverride ?? buildPrompt(run, s);
     Object.assign(s, {
-      status: 'running', output: '', summary: null, originalOutput: null, activity: [], error: null, sentPrompt: body,
-      startedAt: now(), endedAt: null, startSeq: ++run.seq, editSeq: 0, promptEditSeq: 0, manual: false, agreed: false, skipReason: null,
+      status: 'running', output: '', summary: null, originalOutput: null, activity: [], error: null, sentPrompt: body, hurried: Boolean(run.hurry),
+      startedAt: now(), endedAt: null, startSeq: ++run.seq, editSeq: 0, promptEditSeq: 0, manual: false, agreed: false, skipReason: null, endedEarly: false,
     });
     this.active.set(key, { token, controller });
     const live = () => this.active.get(key)?.token === token;
@@ -146,8 +146,9 @@ export class Council extends EventEmitter {
       .then(() => {
         mkdirSync(cwd, { recursive: true });
         return this.runAgent({
-          agent: seat.provider, prompt: `${run.groundRules}\n\n---\n\n${body}\n\n---\n\n${promptSuffix(run, s.agent)}`,
-          cwd, model: seat.model, effort: seat.effort,
+          agent: seat.provider,
+          prompt: `${run.groundRules}\n\n---\n\n${body}\n\n---\n\n${run.hurry ? `${HURRY_NOTE}\n\n` : ''}${promptSuffix(run, s.agent)}`,
+          cwd, model: seat.model, effort: run.hurry ? 'low' : seat.effort,
           signal: controller.signal, onEvent: (e) => { if (live()) this.onAgentEvent(run, s, e); },
         });
       })
@@ -161,8 +162,16 @@ export class Council extends EventEmitter {
       })
       .catch((err) => {
         if (!live()) return;
+        const endEarly = err.aborted && this.active.get(key)?.endEarly;
         this.active.delete(key);
-        Object.assign(s, { status: err.aborted ? 'stopped' : 'failed', error: err.aborted ? 'Stopped by you.' : err.message, endedAt: now() });
+        if (endEarly) {
+          // Ended early by the user: keep what it wrote so far, and carry on.
+          const { output, summary } = parseOutput(s.output);
+          if (output) Object.assign(s, { status: 'done', output, summary, endedEarly: true, error: null, endedAt: now() });
+          else Object.assign(s, { status: 'skipped', skipReason: 'Ended early by you, before it wrote anything.', endedAt: now() });
+        } else {
+          Object.assign(s, { status: err.aborted ? 'stopped' : 'failed', error: err.aborted ? 'Stopped by you.' : err.message, endedAt: now() });
+        }
         this.tick(run);
       });
   }
@@ -199,6 +208,15 @@ export class Council extends EventEmitter {
   pause(run) { run.paused = true; this.changed(run); }
   resume(run) { run.paused = false; this.tick(run); }
 
+  // Stops a step that is taking too long, keeps its partial answer, and moves on.
+  endStep(run, stepId) {
+    const s = this.step(run, stepId);
+    const a = this.active.get(`${run.id}/${s.id}`);
+    if (!a) throw new ConflictError('That step is not running.');
+    a.endEarly = true;
+    a.controller.abort();
+  }
+
   stopStep(run, stepId) {
     const s = this.step(run, stepId);
     const a = this.active.get(`${run.id}/${s.id}`);
@@ -222,10 +240,11 @@ export class Council extends EventEmitter {
       if (s.sentPrompt != null) s.history.push({ at: now(), status: s.status, prompt: s.sentPrompt, output: s.output, error: s.error });
       Object.assign(s, {
         status: 'pending', output: '', summary: null, originalOutput: null, sentPrompt: null, activity: [], error: null,
-        startedAt: null, endedAt: null, startSeq: 0, editSeq: 0, promptEditSeq: 0, manual: false, agreed: false, skipReason: null,
+        startedAt: null, endedAt: null, startSeq: 0, editSeq: 0, promptEditSeq: 0, manual: false, agreed: false, skipReason: null, endedEarly: false,
       });
     }
     run.paused = false;
+    if (run.hurry) this.trimForHurry(run);
     this.tick(run);
   }
 
@@ -266,6 +285,23 @@ export class Council extends EventEmitter {
       run.rulesSeq = ++run.seq;
     }
     this.changed(run);
+  }
+
+  trimForHurry(run) {
+    const pending = turnsOf(run).filter((t) => t.status === 'pending');
+    for (const t of pending.slice(2)) Object.assign(t, { status: 'skipped', skipReason: 'Skipped to hurry up.' });
+  }
+
+  // Hurry mode: later steps use low effort and short replies, and the conversation gets one more turn each.
+  setHurry(run, on) {
+    run.hurry = Boolean(on);
+    const finalStarted = getStep(run, 'final-draft').status !== 'pending';
+    if (run.hurry) {
+      this.trimForHurry(run);
+    } else if (!finalStarted) {
+      for (const t of turnsOf(run)) if (t.skipReason === 'Skipped to hurry up.') Object.assign(t, { status: 'pending', skipReason: null });
+    }
+    this.tick(run);
   }
 
   setMaxTurns(run, value) {

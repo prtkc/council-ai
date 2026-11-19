@@ -240,3 +240,31 @@ test('runs saved by the earlier version still load', () => {
   assert.equal(r.seats.a.model, 'x');
   assert.deepEqual(r.steps.map((s) => [s.id, s.agent]), [['independent-b', 'b'], ['turn-1', 'a']]);
 });
+
+test('hurry mode lowers effort, keeps one more turn each, and can be undone', async () => {
+  const { c, calls } = await make(echo);
+  const r = await c.create(cfg({ startPaused: true, maxTurns: 6, seats: { a: { provider: 'claude', effort: 'max' }, b: { provider: 'chatgpt', effort: 'high' } } }));
+  c.setHurry(r, true);
+  assert.deepEqual(r.steps.filter((s) => s.kind === 'turn').map((s) => s.status), ['pending', 'pending', 'skipped', 'skipped', 'skipped', 'skipped']);
+  c.setHurry(r, false);
+  assert.equal(r.steps.filter((s) => s.status === 'skipped').length, 0);
+  c.setHurry(r, true);
+  c.resume(r);
+  await wait(finished(c, r));
+  assert.ok(calls.every((x) => x.effort === 'low'));
+  assert.ok(calls.every((x) => x.prompt.includes('asked to hurry up')));
+  assert.ok(r.steps.filter((s) => s.status === 'done').every((s) => s.hurried));
+});
+
+test('ending a slow step keeps its partial answer and moves on', async () => {
+  const { c } = await make((a, calls) => (calls.length === 1
+    ? new Promise((_, rej) => { a.onEvent({ type: 'delta', text: 'Partial thoughts so far' }); a.signal.addEventListener('abort', () => rej(Object.assign(new Error('x'), { aborted: true }))); })
+    : echo(a, calls)));
+  const r = await c.create(cfg({ maxTurns: 0 }));
+  await wait(() => r.steps[0].output === 'Partial thoughts so far');
+  c.endStep(r, 'independent-a');
+  await wait(finished(c, r));
+  assert.equal(r.steps[0].status, 'done');
+  assert.equal(r.steps[0].endedEarly, true);
+  assert.equal(r.paused, false);
+});
