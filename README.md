@@ -69,6 +69,7 @@ If I later ask you to change or improve Council, follow the "Contributing change
 - **Conversation length:** set the maximum number of turns. They stop early if both agree nothing is left to discuss.
 - **Editing:** every prompt, answer, the ground rules, the final document, and the files in the run's folder can be edited. Steps that haven't run yet use your edits. Steps that already ran are flagged so you can re-run them.
 - **Viewing:** answers stream in live, with each model's web searches and file changes. Each block has a one-sentence summary, and **Collapse all** tidies the page.
+- **Continue the work:** when a council finishes, a chat box appears at the bottom. Ask any Claude or ChatGPT model to build on the whole output, for example to turn the combined document into a Google Doc. It can edit the run's files. Tick **Use my connected apps** to let it use apps connected to your Claude or ChatGPT account, such as Google Drive or Gmail.
 - **Speed:** while a run is going, **Hurry up** switches later steps to low effort and short replies, and shortens the conversation. Click it again to go back to normal. If one step is taking too long, **End and continue** stops it, keeps what it has written so far, and moves on.
 
 ## Playgrounds
@@ -95,6 +96,7 @@ Everything stays on your Mac, in the Council folder:
 
 - The app only accepts connections from your own Mac, and rejects requests from websites.
 - API keys are removed before either tool starts, so runs always use your subscription.
+- Connected apps such as Google Drive are off, except in the follow-up chat when you tick **Use my connected apps**.
 - Each model can only read and write files inside its run's folder. Claude has file and web tools but no shell. ChatGPT, through Codex, has a sandboxed shell with no network access, plus web search.
 - Text from the other model and from web pages is treated as material to evaluate, not as instructions.
 

@@ -8,7 +8,7 @@ import { loadCatalog } from './models.js';
 import { runAgent as defaultRunAgent } from './providers.js';
 import {
   DEFAULT_GROUND_RULES, HURRY_NOTE, MAX_TURNS_LIMIT, SEATS, STANCES, STANCE_KINDS, buildPrompt, getStep, groupIndex, groupsOf,
-  makeSteps, migrateRun, parseOutput, promptSuffix, turnStep, turnsOf, validateConfig,
+  buildChatPrompt, makeSteps, migrateRun, parseOutput, promptSuffix, turnStep, turnsOf, validateConfig, validateSeat,
 } from './workflow.js';
 
 export class ConflictError extends Error {}
@@ -57,6 +57,8 @@ export class Council extends EventEmitter {
           }
         }
         if (interrupted) run.paused = true;
+        run.chat ??= [];
+        for (const m of run.chat) if (m.status === 'running') Object.assign(m, { status: 'stopped', error: 'Council closed while this reply was being written.' });
         this.runs.set(run.id, run);
       } catch { /* ignore folders that are not valid runs */ }
     }
@@ -69,7 +71,7 @@ export class Council extends EventEmitter {
     const run = {
       id, title: cfg.title, createdAt: now(), prompts: cfg.prompts, maxTurns: cfg.maxTurns,
       firstSpeaker: cfg.firstSpeaker, drafter: cfg.drafter, seats: cfg.seats, stance: cfg.stance, stanceSeq: 0,
-      groundRules: DEFAULT_GROUND_RULES, rulesSeq: 0, paused: cfg.startPaused, seq: 0, steps: makeSteps(cfg),
+      groundRules: DEFAULT_GROUND_RULES, rulesSeq: 0, paused: cfg.startPaused, seq: 0, steps: makeSteps(cfg), chat: [],
     };
     for (const a of SEATS) await fs.mkdir(path.join(this.workspace(id), 'drafts', a), { recursive: true });
     this.runs.set(id, run);
@@ -318,6 +320,72 @@ export class Council extends EventEmitter {
     run.steps.splice(at, 0, ...add);
     run.maxTurns = n;
     this.tick(run);
+  }
+
+  // --- Follow-up chat, once the run's work is done ---
+
+  async sendChat(run, { text, provider, model = '', effort = '', apps = false } = {}) {
+    const body = typeof text === 'string' ? text.trim().slice(0, 50000) : '';
+    if (!body) throw new Error('Write a message first.');
+    if (run.steps.some((s) => s.status === 'running')) throw new ConflictError('Wait for the run to finish before chatting.');
+    const key = `${run.id}/chat`;
+    if (this.active.has(key)) throw new ConflictError('Wait for the current reply, or stop it.');
+    const who = validateSeat({ provider, model, effort }, 'claude', await this.catalog());
+    run.chat ??= [];
+    const history = run.chat.filter((m) => m.status === 'done');
+    const n = run.chat.length;
+    run.chat.push({ id: `c${n + 1}`, role: 'user', text: body, status: 'done', at: now() });
+    const msg = {
+      id: `c${n + 2}`, role: 'assistant', provider: who.provider, model: who.model, effort: who.effort, name: who.name,
+      apps: Boolean(apps), status: 'running', text: '', activity: [], error: null, startedAt: now(), endedAt: null,
+    };
+    run.chat.push(msg);
+    const token = randomUUID();
+    const controller = new AbortController();
+    this.active.set(key, { token, controller });
+    const live = () => this.active.get(key)?.token === token;
+    const prompt = buildChatPrompt(run, history, body, { name: who.name, apps: msg.apps });
+    this.runAgent({
+      agent: who.provider, model: who.model, effort: who.effort, apps: msg.apps, cwd: this.workspace(run.id),
+      prompt: `${run.groundRules}\n\n---\n\n${prompt}`, signal: controller.signal,
+      onEvent: (e) => { if (live()) this.onChatEvent(run, msg, e); },
+    })
+      .then((out) => {
+        if (!live()) return;
+        this.active.delete(key);
+        Object.assign(msg, { status: 'done', text: String(out).trim(), endedAt: now() });
+        this.changed(run);
+      })
+      .catch((err) => {
+        if (!live()) return;
+        this.active.delete(key);
+        Object.assign(msg, { status: err.aborted ? 'stopped' : 'failed', error: err.aborted ? 'Stopped by you.' : err.message, endedAt: now() });
+        this.changed(run);
+      });
+    this.changed(run);
+  }
+
+  stopChat(run) {
+    const a = this.active.get(`${run.id}/chat`);
+    if (!a) throw new ConflictError('Nothing is being written right now.');
+    a.controller.abort();
+  }
+
+  onChatEvent(run, msg, e) {
+    if (e.type === 'delta') {
+      msg.text += e.text;
+      this.emit('event', run.id, { type: 'chatDelta', id: msg.id, text: e.text });
+    } else if (e.type === 'replace') {
+      msg.text = e.text;
+      this.emit('event', run.id, { type: 'chatReplace', id: msg.id, text: e.text });
+    } else if (e.type === 'activity') {
+      const at = msg.activity.findIndex((a) => a.id === e.item.id);
+      if (at >= 0) msg.activity[at] = { ...msg.activity[at], ...e.item };
+      else msg.activity.push({ at: now(), ...e.item });
+      if (msg.activity.length > 300) msg.activity.shift();
+      this.emit('event', run.id, { type: 'chatActivity', id: msg.id, item: msg.activity[at >= 0 ? at : msg.activity.length - 1] });
+    }
+    this.scheduleSave(run);
   }
 
   // --- Persistence and notifications ---

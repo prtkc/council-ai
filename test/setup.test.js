@@ -29,3 +29,12 @@ test('existing tools come before ones Council installs', () => {
 test('only known tools can be installed', () => {
   assert.throws(() => install('left-pad'), /Unknown tool/);
 });
+
+test('connected apps are off unless asked for', async () => {
+  const { claudeCommand, codexCommand } = await import('../src/providers.js');
+  assert.ok(claudeCommand({}).args.includes('--strict-mcp-config'));
+  const on = claudeCommand({ connectors: ['mcp__claude_ai_Google_Drive'] }).args;
+  assert.ok(!on.includes('--strict-mcp-config') && on.includes('mcp__claude_ai_Google_Drive'));
+  assert.ok(!codexCommand({ cwd: '/w' }).args.includes('--approve-for-me'));
+  assert.ok(codexCommand({ cwd: '/w', apps: true }).args.includes('--approve-for-me'));
+});

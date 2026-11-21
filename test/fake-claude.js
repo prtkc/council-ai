@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // A stand-in for the Claude CLI, for trying the interface without using any plan limits.
+if (process.argv.includes('mcp')) {
+  console.log('claude.ai Google Drive: https://example.invalid - ✔ Connected');
+  process.exit(0);
+}
 if (process.argv.includes('auth')) {
   console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'test double' }));
   process.exit(0);
@@ -15,13 +19,14 @@ if (prompt.includes('## Review of')) text = "## Review of ChatGPT's answer\nA te
 if (/turn \d+ of at most/.test(prompt)) text = 'A test conversation message, replying to the latest point.';
 if (prompt.includes('Write the combined document') || prompt.includes('Produce the final version')) text = '# Combined test document\n\n## Findings\n\n| Source | Point |\n| --- | --- |\n| Both | Test content |\n\n## Open disagreements\n\nNone.';
 
+if (prompt.includes('<request>')) text = `Test double follow-up reply. Connected apps: ${process.argv.includes('--strict-mcp-config') ? 'off' : 'on'}.`;
 const playground = prompt.match(/You are (.+?)\. Your role:[\s\S]*one of: (.+?)\]\]/);
 if (playground) {
   const [, me, list] = playground;
   const others = list.split(', ');
   const next = others[Math.floor(Math.random() * others.length)];
   text = `Test double speaking as ${me}. I have looked at the brief and I want ${next} to weigh in next on the plan and the trade-offs.\n\n[[NEXT: ${next}]]\n[[SUMMARY_S: ${me} passes to ${next}.]]\n[[SUMMARY_M: I've read the brief. ${next}, can you take the next part and tell us the trade-offs?]]\n[[SUMMARY_L: I've gone through the brief and sketched where we stand. ${next}, I'd like you to take the next part, walk us through the trade-offs you see, and flag anything that could block us later.]]`;
-} else {
+} else if (!prompt.includes('<request>')) {
   text += '\n\n[[SUMMARY: The test double gave a placeholder reply for the user.]]';
 }
 

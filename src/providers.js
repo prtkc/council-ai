@@ -1,7 +1,10 @@
 // Runs the locally installed, subscription-signed-in CLIs. Never uses API keys.
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import readline from 'node:readline';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const exec = promisify(execFile);
 
 const CLAUDE_TOOLS = 'Read,Write,Edit,Glob,Grep,WebSearch,WebFetch';
 
@@ -15,20 +18,24 @@ export function cleanEnv(env = process.env) {
   return out;
 }
 
-export function claudeCommand({ model, effort }) {
+// connectors: null keeps Claude away from all connected apps. A list of tool prefixes
+// (such as mcp__claude_ai_Google_Drive) loads the account's connectors and allows those.
+export function claudeCommand({ model, effort, connectors = null }) {
   const args = [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-mode', 'dontAsk',
     '--tools', CLAUDE_TOOLS,
-    '--allowedTools', 'Read(./**)', 'Edit(./**)', 'Write(./**)', 'WebSearch', 'WebFetch',
-    '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
+    '--allowedTools', 'Read(./**)', 'Edit(./**)', 'Write(./**)', 'WebSearch', 'WebFetch', ...(connectors || []),
+    ...(connectors ? [] : ['--strict-mcp-config']), '--setting-sources', '', '--no-session-persistence',
   ];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   return { bin: process.env.COUNCIL_CLAUDE_BIN || 'claude', args };
 }
 
-export function codexCommand({ model, effort, cwd }) {
+// apps: lets Codex's automatic reviewer approve actions in apps linked to the ChatGPT account,
+// such as creating a Google Doc. Without it, those actions are refused.
+export function codexCommand({ model, effort, cwd, apps = false }) {
   const args = [
     'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
     '-C', cwd,
@@ -41,6 +48,7 @@ export function codexCommand({ model, effort, cwd }) {
   ];
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
+  if (apps) args.push('--approve-for-me');
   args.push('-');
   return { bin: process.env.COUNCIL_CODEX_BIN || 'codex', args };
 }
@@ -168,14 +176,35 @@ export function friendlyError(agent, message) {
   return m;
 }
 
+// The apps connected to the person's Claude account, as tool-permission prefixes.
+let connectorCache = null;
+export async function claudeConnectors() {
+  if (connectorCache && Date.now() - connectorCache.at < 10 * 60 * 1000) return connectorCache.list;
+  const { stdout } = await exec(process.env.COUNCIL_CLAUDE_BIN || 'claude', ['mcp', 'list'], { env: cleanEnv(), timeout: 60000 });
+  const list = stdout.split('\n')
+    .map((l) => l.match(/^claude\.ai (.+?): /)?.[1])
+    .filter(Boolean)
+    .map((name) => `mcp__claude_ai_${name.replace(/[^A-Za-z0-9]+/g, '_')}`);
+  connectorCache = { at: Date.now(), list };
+  return list;
+}
+
 // Runs one agent turn. Resolves with the final text, rejects on failure or abort.
-export function runAgent({ agent, prompt, cwd, model, effort, signal, onEvent = () => {} }) {
+// apps: true lets the agent use apps connected to the person's account, such as Google Drive.
+export function runAgent({ agent, prompt, cwd, model, effort, apps = false, connectors, signal, onEvent = () => {} }) {
+  if (apps && agent === 'claude' && !connectors) {
+    return claudeConnectors().then((list) => runAgent({ agent, prompt, cwd, model, effort, apps, connectors: list, signal, onEvent }));
+  }
   return new Promise((resolve, reject) => {
-    const { bin, args } = agent === 'claude' ? claudeCommand({ model, effort }) : codexCommand({ model, effort, cwd: path.resolve(cwd) });
+    const { bin, args } = agent === 'claude'
+      ? claudeCommand({ model, effort, connectors: apps ? connectors : null })
+      : codexCommand({ model, effort, cwd: path.resolve(cwd), apps });
     const parser = (agent === 'claude' ? createClaudeParser : createCodexParser)(onEvent);
     let stderr = '';
     let killTimer;
-    const child = spawn(bin, args, { cwd, env: cleanEnv(), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Connectors normally load in the background, after the reply has started; this waits for them.
+    const env = apps && agent === 'claude' ? { ...cleanEnv(), MCP_CONNECTION_NONBLOCKING: 'false' } : cleanEnv();
+    const child = spawn(bin, args, { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const kill = (sig) => { try { process.kill(-child.pid, sig); } catch { /* already gone */ } };
     const abort = () => { kill('SIGTERM'); killTimer = setTimeout(() => kill('SIGKILL'), 3000); };
     if (signal?.aborted) abort();

@@ -268,3 +268,29 @@ test('ending a slow step keeps its partial answer and moves on', async () => {
   assert.equal(r.steps[0].endedEarly, true);
   assert.equal(r.paused, false);
 });
+
+test('after a run, you can keep chatting with any model about the whole output', async () => {
+  const { c, calls } = await make(echo);
+  const r = await c.create(cfg({ maxTurns: 0 }));
+  await wait(finished(c, r));
+  await c.sendChat(r, { text: 'Make it a Google Doc', provider: 'chatgpt', model: '', effort: 'low', apps: true });
+  await wait(() => r.chat.at(-1).status === 'done');
+  const last = calls.at(-1);
+  assert.equal(last.agent, 'chatgpt');
+  assert.equal(last.apps, true);
+  assert.match(last.prompt, /<request>\nMake it a Google Doc\n<\/request>/);
+  assert.match(last.prompt, /<combined_document>\nanswer \d+ from claude/);
+  assert.deepEqual(r.chat.map((m) => m.role), ['user', 'assistant']);
+  await c.sendChat(r, { text: 'Thanks', provider: 'claude' });
+  await wait(() => r.chat.at(-1).status === 'done');
+  assert.match(calls.at(-1).prompt, /<chat_so_far>\n### The user\nMake it a Google Doc/);
+  assert.equal(calls.at(-1).apps, false);
+});
+
+test('chat waits until the run has finished', async () => {
+  const { c } = await make(() => new Promise(() => {}));
+  const r = await c.create(cfg());
+  await wait(() => r.steps[0].status === 'running');
+  await assert.rejects(c.sendChat(r, { text: 'hi', provider: 'claude' }), /Wait for the run to finish/);
+  await c.shutdown();
+});

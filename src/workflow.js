@@ -43,7 +43,7 @@ export const turnStep = (n, first) => {
   return step(`turn-${n}`, `turn-${n}`, 'turn', agent, `Turn ${n}`, { turn: n });
 };
 
-function validateSeat(input, fallback, catalog) {
+export function validateSeat(input, fallback, catalog) {
   const provider = PROVIDERS[input?.provider] ? input.provider : fallback;
   const model = typeof input?.model === 'string' ? input.model.trim() : '';
   const effort = typeof input?.effort === 'string' ? input.effort.trim() : '';
@@ -169,7 +169,7 @@ function transcript(run) {
 
 const revised = (run) => SEATS.map((a) => block('revised_answer', contentOf(run, `revise-${a}`), nameOf(run, a))).join('\n\n');
 
-function fullRecord(run) {
+export function fullRecord(run) {
   return [
     briefs(run),
     ...SEATS.map((a) => block('independent_answer', contentOf(run, `independent-${a}`), nameOf(run, a))),
@@ -255,4 +255,30 @@ Apply each valid fix. If you reject one, record it under "Open disagreements". R
     default:
       throw new Error(`Unknown step kind: ${s.kind}`);
   }
+}
+
+// --- Follow-up chat after a run ---
+
+export function buildChatPrompt(run, history, request, { name, apps }) {
+  const doc = ['final-apply', 'final-draft'].map((id) => getStep(run, id)).find((s) => s?.status === 'done');
+  const past = history.length
+    ? history.map((m) => `### ${m.role === 'user' ? 'The user' : m.name}\n${m.text}`).join('\n\n')
+    : '(this is the first message)';
+  return `You are ${name}. You are continuing the work from a Council run, where ${nameOf(run, 'a')} and ${nameOf(run, 'b')} researched the briefs below, reviewed each other, talked it through, and wrote a combined document. You now work directly for the user.
+
+Everything the run produced:
+${fullRecord(run)}
+
+${block('combined_document', doc ? doc.output : '(no combined document was finished)')}
+
+Your current directory is the run's workspace. It holds files the participants created, such as drafts/a and drafts/b, and you may create or edit files there. Look there when it helps.
+
+${block('chat_so_far', past)}
+
+The user's new request:
+${block('request', request)}
+
+Do what the user asks, building on the work above rather than starting over. ${apps
+    ? 'You may use the apps connected to the user\'s account, such as Google Drive, when the request calls for it. When you create or change something there, say exactly what, with links.'
+    : 'You cannot use outside apps such as Google Drive in this chat. If the request needs one, say so, and tell the user to turn on "Use my connected apps" and ask again.'} Reply in Markdown.`;
 }

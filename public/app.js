@@ -90,6 +90,12 @@ function openRun(id) {
     if (i >= 0) s.activity[i] = d.item; else s.activity.push(d.item);
     markLive(s.id);
   });
+  es.addEventListener('chatDelta', (e) => chatLive(e, (m, d) => { m.text += d.text; }));
+  es.addEventListener('chatReplace', (e) => chatLive(e, (m, d) => { m.text = d.text; }));
+  es.addEventListener('chatActivity', (e) => chatLive(e, (m, d) => {
+    const i = m.activity.findIndex((a) => a.id === d.item.id);
+    if (i >= 0) m.activity[i] = d.item; else m.activity.push(d.item);
+  }));
 }
 
 function shell() {
@@ -146,9 +152,90 @@ function renderWorkflow() {
       const steps = ui.run.steps.filter(p.match);
       return `<section class="phase"><header><h2>${p.title}</h2><p class="muted small">${p.note}</p></header>
         <div class="cards ${p.layout}">${steps.map((s) => `<article id="card-${s.id}"></article>`).join('') || '<p class="muted small">No turns in this run.</p>'}</div></section>`;
-    }).join('');
+    }).join('') + '<section class="phase chat-phase" id="chat-section" hidden></section>';
+    ui.chatSigs = new Map();
   }
   ui.run.steps.forEach(renderCard);
+  renderChat();
+}
+
+// --- Follow-up chat, once the run is done ---
+const chatName = (m) => m.name || (m.provider === 'chatgpt' ? 'ChatGPT' : 'Claude');
+
+function chatMsgHtml(m) {
+  if (m.role === 'user') return `<div class="chat-msg user"><div class="prose">${markdown(m.text)}</div></div>`;
+  const running = m.status === 'running';
+  return `<article class="chat-msg agent agent-${m.provider} status-${m.status}" data-chat="${m.id}">
+    <header><span class="avatar"></span><strong>${esc(chatName(m))}</strong>
+      <span class="muted small">${running ? 'writing…' : m.status === 'done' ? '' : esc(m.status)}${m.apps ? ' · connected apps on' : ''}</span>
+      ${running ? '<button class="link" data-chat-stop>Stop</button>' : ''}</header>
+    ${m.activity?.length ? `<details ${running ? 'open' : ''}><summary>Working steps <span data-count>${m.activity.length}</span></summary><ul class="activity">${activityHtml(m)}</ul></details>` : ''}
+    ${m.text ? `<div class="prose">${markdown(m.text)}</div>` : running ? '<p class="muted small working">Working…</p>' : ''}
+    ${m.error ? `<div class="notice ${m.status === 'failed' ? 'bad' : ''}">${esc(m.error).replace(/\n/g, '<br>')}</div>` : ''}
+  </article>`;
+}
+
+async function fillChatModels(form) {
+  ui.catalog ||= (await api('/models')).providers;
+  const { a } = ui.run.seats;
+  form.model.innerHTML = Object.entries(ui.catalog).map(([p, info]) => `<optgroup label="${esc(info.name)}"><option value="${p}:">${esc(info.name)} (default model)</option>${info.models.map((m) => `<option value="${p}:${esc(m.id)}">${esc(m.label)}</option>`).join('')}</optgroup>`).join('');
+  form.model.value = `${a.provider}:${a.model}`;
+  if (!form.model.value) form.model.value = `${a.provider}:`;
+  fillChatEffort(form);
+}
+function fillChatEffort(form) {
+  const [p, ...rest] = form.model.value.split(':');
+  const entry = ui.catalog[p]?.models.find((m) => m.id === rest.join(':'));
+  const efforts = entry?.efforts || ui.catalog[p]?.efforts || [];
+  form.effort.innerHTML = `<option value="">Default effort</option>${efforts.map((e) => `<option value="${e}">${EFFORT_LABEL[e] || e} effort</option>`).join('')}`;
+}
+
+function renderChat() {
+  const sec = $('#chat-section');
+  if (!sec || !ui.run) return;
+  const r = ui.run;
+  const chat = r.chat || [];
+  const busy = r.steps.some((s) => s.status === 'running');
+  sec.hidden = !(r.state === 'complete' || chat.length);
+  if (sec.hidden) return;
+  if (!$('#chat-form', sec)) {
+    sec.innerHTML = `<header><h2>Continue the work</h2><p class="muted small">Ask Claude or ChatGPT to build on everything above. They can read and edit this run's files, and, if you allow it, use apps connected to your account, such as Google Drive.</p></header>
+      <div class="chat-list" id="chat-list"></div>
+      <form class="chat-form" id="chat-form">
+        <textarea name="text" rows="3" placeholder="For example: turn the combined document into a new Google Doc, with the pilot proposals as a table" aria-label="Your message"></textarea>
+        <div class="chat-row">
+          <select name="model" aria-label="Model"></select><select name="effort" aria-label="Effort"></select>
+          <label class="check small"><input type="checkbox" name="apps"> Use my connected apps (Google Drive, Gmail…)</label>
+          <button class="primary" type="submit" name="send">Send</button>
+        </div>
+      </form>`;
+    ui.chatSigs = new Map();
+    guard(fillChatModels)($('#chat-form', sec));
+  }
+  const list = $('#chat-list', sec);
+  const ids = chat.map((m) => m.id).join();
+  if (list.dataset.ids !== ids) {
+    list.dataset.ids = ids;
+    list.innerHTML = chat.map((m) => `<div data-chat-slot="${m.id}"></div>`).join('');
+    ui.chatSigs.clear();
+  }
+  for (const m of chat) {
+    const sig = JSON.stringify(m);
+    if (ui.chatSigs.get(m.id) === sig) continue;
+    ui.chatSigs.set(m.id, sig);
+    list.querySelector(`[data-chat-slot="${m.id}"]`).innerHTML = chatMsgHtml(m);
+  }
+  const writing = chat.some((m) => m.status === 'running');
+  $('#chat-form', sec).send.disabled = writing || busy;
+}
+
+function chatLive(e, fn) {
+  const d = JSON.parse(e.data);
+  const m = ui.run?.chat?.find((x) => x.id === d.id);
+  if (!m) return;
+  fn(m, d);
+  if (chatLive.t) return;
+  chatLive.t = setTimeout(() => { chatLive.t = null; if (ui.tab === 'workflow') renderChat(); }, 120);
 }
 
 const editKey = (id, field) => `${id}:${field}`;
@@ -336,7 +423,26 @@ main.addEventListener('toggle', (e) => {
   if (s && e.target.open !== isOpen(s, sec)) ui.toggled.set(editKey(id, sec), e.target.open);
 }, true);
 main.addEventListener('input', (e) => { if (e.target.dataset?.edit) ui.edits.set(e.target.dataset.edit, e.target.value); if (e.target.id === 'doc-editor') ui.docEdit = e.target.value; if (e.target.id === 'rules') ui.rulesDraft = e.target.value; });
+main.addEventListener('submit', guard(async (e) => {
+  if (e.target.id !== 'chat-form') return;
+  e.preventDefault();
+  const f = e.target;
+  const text = f.text.value.trim();
+  if (!text) return;
+  const [provider, ...rest] = f.model.value.split(':');
+  f.send.disabled = true;
+  try {
+    applyRun(await api(runPath('/chat'), 'POST', { text, provider, model: rest.join(':'), effort: f.effort.value, apps: f.apps.checked }));
+    f.text.value = '';
+  } finally {
+    renderChat();
+  }
+}));
+main.addEventListener('keydown', (e) => {
+  if (e.target.form?.id === 'chat-form' && e.target.name === 'text' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.target.form.requestSubmit(); }
+});
 main.addEventListener('change', guard(async (e) => {
+  if (e.target.form?.id === 'chat-form' && e.target.name === 'model') { fillChatEffort(e.target.form); return; }
   if (e.target.id === 'run-stance') applyRun(await api(runPath(), 'PATCH', { stance: Number(e.target.value) }));
   if (e.target.id === 'max-turns') {
     try { applyRun(await api(runPath('/turns'), 'POST', { maxTurns: Number(e.target.value) })); } catch (err) { e.target.value = ui.run.maxTurns; throw err; }
@@ -349,6 +455,7 @@ main.addEventListener('click', guard(async (e) => {
   if (d.tab) { ui.tab = d.tab; $('#tab-body').innerHTML = ''; renderRun(); return; }
   if (d.bulk) { ui.bulk = d.bulk === 'expand'; ui.toggled.clear(); renderWorkflow(); return; }
   if (d.run) { applyRun(await api(runPath(`/${d.run}`), 'POST')); return; }
+  if ('chatStop' in d) { applyRun(await api(runPath('/chat/stop'), 'POST')); return; }
   if ('hurry' in d) { applyRun(await api(runPath('/hurry'), 'POST', { on: !ui.run.hurry })); toast(ui.run.hurry ? 'Hurrying from the next step: low effort, short replies, one more turn each.' : 'Back to normal.'); return; }
   if (d.doc) { await docAction(d.doc); return; }
   if ('fileRefresh' in d) { await renderFiles(); return; }

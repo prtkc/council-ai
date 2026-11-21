@@ -130,6 +130,14 @@ Every agent reply ends with `[[NEXT: name]]`, `[[SUMMARY_S/M/L: …]]`, and opti
 
 Data lives in `playgrounds/<id>/playground.json`. The team's shared sandbox is `workspace/`. "Re-run from here" moves later messages into `history`.
 
+### Follow-up chat
+
+Once a council has no running step, `Council.sendChat()` takes a request, a provider and model, an effort, and `apps`. The prompt (`buildChatPrompt()`) holds the full record, the combined document, the chat so far, and the request. Replies run in the run's workspace and are stored in `run.chat`. Only one reply runs at a time.
+
+`apps: true` is the only path that lets an agent reach the person's connected apps:
+- **Claude:** `--strict-mcp-config` is dropped, and each claude.ai connector from `claude mcp list` is allowed, for example `mcp__claude_ai_Google_Drive`. `MCP_CONNECTION_NONBLOCKING=false` makes the connectors load before the reply starts.
+- **Codex:** `--approve-for-me` is added, so its automatic reviewer can approve actions in apps linked to the ChatGPT account.
+
 ### Run data
 
 `runs/<id>/run.json` is the source of truth, written atomically. `combined.md` is a copy of the latest document. `workspace/` is the agents' sandbox. `migrateRun()` upgrades runs from the version that had fixed `claude` and `chatgpt` seats. Keep it working.
@@ -137,7 +145,7 @@ Data lives in `playgrounds/<id>/playground.json`. The team's shared sandbox is `
 ## Rules the code must keep
 
 1. **No API billing.** `cleanEnv()` removes `ANTHROPIC_*`, `CLAUDE*`, `OPENAI_*`, and `CODEX_API_KEY` before spawning. Claude steps abort if the init event's `apiKeySource` isn't `none`. Codex is forced to `forced_login_method="chatgpt"`. Sign-in status only counts subscription logins.
-2. **Agents stay in their folder.** Claude gets `--tools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` with `--permission-mode dontAsk` and `./**` path rules, and no shell. Codex gets a custom permission profile: minimal read, write only to the project root (`project_root_markers=[]` pins it to the working directory), and no network for its shell. Never add `--dangerously-*` flags. After touching `providers.js`, run `npm run verify`.
+2. **Agents stay in their folder.** Claude gets `--tools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` with `--permission-mode dontAsk` and `./**` path rules, and no shell. Codex gets a custom permission profile: minimal read, write only to the project root (`project_root_markers=[]` pins it to the working directory), and no network for its shell. Never add `--dangerously-*` flags. Connected apps are only reachable through the follow-up chat's opt-in `apps` flag. After touching `providers.js`, run `npm run verify`.
 3. **Local only.** The server binds `127.0.0.1` and rejects foreign `Host`, `Origin`, and cross-site fetch metadata. Mutating requests must be `application/json`. The workspace file API resolves real paths and refuses symlinks and `..`.
 4. **Untrusted text stays inert.** Model output, web content, and files are escaped before rendering. Prompts wrap the other participant's text in tags and say it is material, not instructions.
 5. **User edits win.** Don't overwrite something the person edited. Mark dependents stale instead.

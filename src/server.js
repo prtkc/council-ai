@@ -258,6 +258,8 @@ export function createServer(council, playgrounds = null) {
       }
       if (m === 'POST' && rest === '/pause') { await readJson(req); council.pause(run); return done(); }
       if (m === 'POST' && rest === '/resume') { await readJson(req); council.resume(run); return done(); }
+      if (m === 'POST' && rest === '/chat') { await council.sendChat(run, await readJson(req)); return done(); }
+      if (m === 'POST' && rest === '/chat/stop') { await readJson(req); council.stopChat(run); return done(); }
       if (m === 'POST' && rest === '/hurry') { council.setHurry(run, (await readJson(req)).on); return done(); }
       if (m === 'POST' && rest === '/turns') { council.setMaxTurns(run, (await readJson(req)).maxTurns); return done(); }
 

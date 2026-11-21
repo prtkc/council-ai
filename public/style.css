@@ -176,3 +176,14 @@ button.danger { color: var(--bad); border-color: var(--bad); align-self: flex-st
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 button.hurry[aria-pressed="true"] { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+/* --- Follow-up chat --- */
+.chat-phase { border-top: 1px solid var(--line); padding-top: 18px; }
+.chat-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.chat-msg { max-width: min(860px, 100%); overflow-wrap: anywhere; }
+.chat-msg.user { align-self: flex-end; background: var(--sunken); border-radius: 12px 12px 2px 12px; padding: 8px 12px; max-width: min(640px, 90%); }
+.chat-msg.agent { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; padding: 10px 13px; }
+.chat-msg.agent header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; } .chat-msg.agent header .link { margin-left: auto; }
+.chat-msg .avatar { width: 16px; height: 16px; border-radius: 50%; background: var(--soft); border: 4px solid var(--accent); }
+.chat-msg details { font-size: 13px; margin: 4px 0; } .chat-msg details > summary { cursor: pointer; color: var(--muted); }
+.chat-form { display: flex; flex-direction: column; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
+.chat-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } .chat-row select { width: auto; max-width: 230px; } .chat-row .check { font-weight: 400; } .chat-row button { margin-left: auto; }
